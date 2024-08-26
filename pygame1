@@ -1,0 +1,176 @@
+import pygame
+from random import randrange as rnd
+
+WIDTH, HEIGHT = 1200, 800
+fps = 60
+
+# Paddle settings
+paddle_w = 330
+paddle_h = 35
+paddle_speed = 15
+paddle = pygame.Rect(WIDTH // 2 - paddle_w // 2, HEIGHT - paddle_h - 10, paddle_w, paddle_h)
+
+# Ball settings
+ball_radius = 20
+ball_speed = 6
+ball_rect = int(ball_radius * 2 ** 0.5)
+ball = pygame.Rect(rnd(ball_rect, WIDTH - ball_rect), HEIGHT // 2, ball_rect, ball_rect)
+dx, dy = 1, -1
+
+# Game settings
+level = 1
+max_level = 3
+game_over = False
+
+# Bonus settings
+BONUS_TYPES = ['clone_ball', 'expand_paddle']
+bonus_prob = 0.2  # 20% chance for a block to have a bonus
+
+pygame.init()
+sc = pygame.display.set_mode((WIDTH, HEIGHT))
+clock = pygame.time.Clock()
+font = pygame.font.Font(None, 36)
+
+# Background image
+img = pygame.image.load('1.jpg').convert()
+
+def create_blocks(level):
+    blocks = []
+    for i in range(8 + level * 2):  # Increase number of blocks with each level
+        for j in range(3 + level):  # Increase rows of blocks with each level
+            rect = pygame.Rect(10 + 120 * i, 10 + 70 * j, 100, 50)
+            has_bonus = rnd(0, 100) < bonus_prob * 100  # Determine if block has bonus
+            bonus_type = BONUS_TYPES[rnd(0, len(BONUS_TYPES))] if has_bonus else None
+            blocks.append({'rect': rect, 'bonus': bonus_type})
+    return blocks
+
+def create_colors(blocks):
+    return [(rnd(30, 256), rnd(30, 256), rnd(30, 256)) if block['bonus'] is None else (255, 255, 0) for block in blocks]
+
+def detect_collision(dx, dy, ball, rect):
+    if dx > 0:
+        delta_x = ball.right - rect.left
+    else:
+        delta_x = rect.right - ball.left
+    if dy > 0:
+        delta_y = ball.bottom - rect.top
+    else:
+        delta_y = rect.bottom - ball.top
+
+    if abs(delta_x - delta_y) < 10:
+        dx, dy = -dx, -dy
+    elif delta_x > delta_y:
+        dy = -dy
+    elif delta_y > delta_x:
+        dx = -dx
+    return dx, dy
+
+def activate_bonus(bonus_type):
+    global paddle_w, balls
+    if bonus_type == 'clone_ball':
+        new_ball = ball.copy()  # Clone the ball
+        new_dx, new_dy = -dx, dy  # Make the new ball move in a different direction
+        balls.append({'ball': new_ball, 'dx': new_dx, 'dy': new_dy})
+        
+def reset_game(new_level):
+    global ball, dx, dy, block_list, color_list, ball_speed, paddle_w, paddle, game_over, balls
+    ball = pygame.Rect(rnd(ball_rect, WIDTH - ball_rect), HEIGHT // 2, ball_rect, ball_rect)
+    dx, dy = 1, -1
+    block_list = create_blocks(new_level)
+    color_list = create_colors(block_list)
+    ball_speed += 1
+    paddle_w = max(paddle_w - 30, 150)  # Decrease paddle width, but not below 150
+    paddle = pygame.Rect(WIDTH // 2 - paddle_w // 2, HEIGHT - paddle_h - 10, paddle_w, paddle_h)
+    balls = [{'ball': ball, 'dx': dx, 'dy': dy}]  # Reset the balls list with the initial ball
+    game_over = False
+
+def draw_try_again():
+    try_again_text = font.render("Try Again", True, (255, 255, 255))
+    try_again_rect = try_again_text.get_rect(center=(WIDTH // 2, HEIGHT // 2))
+    pygame.draw.rect(sc, (0, 0, 0), try_again_rect.inflate(20, 20))
+    sc.blit(try_again_text, try_again_rect)
+    return try_again_rect
+
+# Inisialisasi blok dan warna untuk level pertama
+block_list = create_blocks(level)
+color_list = create_colors(block_list)
+
+# Initialize balls list for managing multiple balls
+balls = [{'ball': ball, 'dx': dx, 'dy': dy}]
+
+while True:
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            exit()
+        if event.type == pygame.MOUSEBUTTONDOWN and game_over:
+            if try_again_rect.collidepoint(event.pos):
+                reset_game(level)
+    
+    sc.blit(img, (0, 0))
+    
+    if not game_over:
+        # Drawing world
+        for i, block in enumerate(block_list):
+            color = color_list[i]
+            pygame.draw.rect(sc, color, block['rect'])
+
+        pygame.draw.rect(sc, pygame.Color('darkorange'), paddle)
+        for ball_info in balls:
+            ball = ball_info['ball']
+            pygame.draw.circle(sc, pygame.Color('white'), ball.center, ball_radius)
+        
+        # Ball movement and collision detection
+        for ball_info in balls:
+            ball = ball_info['ball']
+            ball_info['ball'].x += ball_speed * ball_info['dx']
+            ball_info['ball'].y += ball_speed * ball_info['dy']
+
+            # Collision with walls
+            if ball.centerx < ball_radius or ball.centerx > WIDTH - ball_radius:
+                ball_info['dx'] = -ball_info['dx']
+            if ball.centery < ball_radius:
+                ball_info['dy'] = -ball_info['dy']
+
+            # Collision with paddle
+            if ball.colliderect(paddle) and ball_info['dy'] > 0:
+                ball_info['dx'], ball_info['dy'] = detect_collision(ball_info['dx'], ball_info['dy'], ball, paddle)
+            
+            # Collision with blocks
+            hit_index = ball.collidelist([block['rect'] for block in block_list])
+            if hit_index != -1:
+                hit_block = block_list.pop(hit_index)
+                color_list.pop(hit_index)
+                ball_info['dx'], ball_info['dy'] = detect_collision(ball_info['dx'], ball_info['dy'], ball, hit_block['rect'])
+                if hit_block['bonus'] is not None:
+                    activate_bonus(hit_block['bonus'])
+                # Special effect
+                hit_block['rect'].inflate_ip(ball.width * 3, ball.height * 3)
+                pygame.draw.rect(sc, (rnd(30, 256), rnd(30, 256), rnd(30, 256)), hit_block['rect'])
+
+        # Check if all balls are out of bounds
+        balls = [ball_info for ball_info in balls if ball_info['ball'].bottom <= HEIGHT]
+        if not balls:
+            game_over = True
+
+        # Check if all blocks are destroyed
+        if not block_list:
+            if level < max_level:
+                level += 1
+                reset_game(level)
+
+            else:
+                print('Congratulations! You completed all levels!')
+                exit()
+        
+        # Control
+        key = pygame.key.get_pressed()
+        if key[pygame.K_LEFT] and paddle.left > 0:
+            paddle.left -= paddle_speed
+        if key[pygame.K_RIGHT] and paddle.right < WIDTH:
+            paddle.right += paddle_speed
+    else:
+        try_again_rect = draw_try_again()
+    
+    # Update screen
+    pygame.display.flip()
+    clock.tick(fps)
